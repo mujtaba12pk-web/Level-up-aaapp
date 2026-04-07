@@ -278,8 +278,7 @@
             firebase.initializeApp(firebaseConfig);
             database = firebase.database();
         } catch (e) {
-            console.error("Firebase init failed. Please check your config.");
-            alert("Database connection failed. Please configure Firebase settings in the code.");
+            console.error("Firebase init failed. Running in offline mode.");
         }
 
         // --- GAME LOGIC ---
@@ -292,6 +291,18 @@
 
         const getLvl = (xp) => Math.floor(Math.sqrt(xp) / 10) + 1;
         const getXPForLvl = (lvl) => Math.pow((lvl - 1) * 10, 2);
+        const LS_USER_PREFIX = "global_rpg_user_";
+        function loadLocalUser(name) {
+            try {
+                const raw = localStorage.getItem(LS_USER_PREFIX + name);
+                return raw ? JSON.parse(raw) : null;
+            } catch { return null; }
+        }
+        function saveLocalUser(data) {
+            try {
+                localStorage.setItem(LS_USER_PREFIX + data.username, JSON.stringify(data));
+            } catch {}
+        }
 
         // UI Elements
         const authOverlay = document.getElementById('auth-overlay');
@@ -312,22 +323,37 @@
         // Authentication Logic
         enterBtn.onclick = async () => {
             const name = usernameInput.value.trim();
-            if (name.length < 3) return alert("Username must be at least 3 characters.");
+            const valid = /^[a-zA-Z0-9_]{3,20}$/.test(name);
+            if (!valid) return alert("Username must be 3-20 characters, letters/numbers/underscore only.");
             
             userData.username = name;
             
-            // Fetch existing data or create new
-            const snapshot = await database.ref('users/' + name).once('value');
-            if (snapshot.exists()) {
-                userData = snapshot.val();
+            // Fetch existing data or create new (online/offline)
+            if (database) {
+                try {
+                    const snapshot = await database.ref('users/' + name).once('value');
+                    if (snapshot.exists()) {
+                        userData = snapshot.val();
+                    } else {
+                        await database.ref('users/' + name).set(userData);
+                    }
+                } catch(e) {
+                    const local = loadLocalUser(name);
+                    if (local) userData = local;
+                }
             } else {
-                await database.ref('users/' + name).set(userData);
+                const local = loadLocalUser(name);
+                if (local) userData = local;
+                else saveLocalUser(userData);
             }
 
             authOverlay.style.display = 'none';
             userDisplay.textContent = userData.username;
             updateUI();
-            startLeaderboardSync();
+            if (database) startLeaderboardSync();
+            else {
+                leaderboardList.innerHTML = '<div class="muted">Offline mode: configure Firebase to enable global leaderboard.</div>';
+            }
         };
 
         // Quest Logic
@@ -352,12 +378,20 @@
             userData.history.unshift(questEntry);
             if (userData.history.length > 20) userData.history.pop();
 
-            // Save to Firebase
-            await database.ref('users/' + userData.username).update({
-                xp: userData.xp,
-                level: userData.level,
-                history: userData.history
-            });
+            // Save (online/offline)
+            saveLocalUser(userData);
+            if (database) {
+                try {
+                    await database.ref('users/' + userData.username).update({
+                        xp: userData.xp,
+                        level: userData.level,
+                        history: userData.history
+                    });
+                } catch(e) {
+                    // keep local state; show soft notice in console
+                    console.warn("Failed to sync to database, retained local progress.");
+                }
+            }
 
             // UI Feedback
             questInput.value = '';
@@ -373,8 +407,8 @@
             const currentLvlXP = getXPForLvl(userData.level);
             const nextLvlXP = getXPForLvl(userData.level + 1);
             const progressXP = userData.xp - currentLvlXP;
-            const neededXP = nextLvlXP - currentLvlXP;
-            const percent = (progressXP / neededXP) * 100;
+            const neededXP = Math.max(nextLvlXP - currentLvlXP, 1);
+            const percent = Math.min(100, Math.max(0, (progressXP / neededXP) * 100));
             
             xpBarFill.style.width = percent + '%';
             xpTextDisplay.textContent = `${userData.xp} / ${nextLvlXP} XP`;
