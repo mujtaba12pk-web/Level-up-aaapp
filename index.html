@@ -1,0 +1,434 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Global RPG Task Manager</title>
+    <!-- Firebase SDKs -->
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-database-compat.js"></script>
+    <style>
+        :root {
+            --bg: #0a0e14;
+            --panel: #161b22;
+            --accent: #00d2ff;
+            --accent-glow: rgba(0, 210, 255, 0.4);
+            --xp-color: #3affc0;
+            --lvl-color: #ff9f1c;
+            --text: #e6edf3;
+            --muted: #8b949e;
+            --danger: #ff4d4d;
+            --border: rgba(255, 255, 255, 0.1);
+        }
+
+        * { box-sizing: border-box; }
+        body {
+            margin: 0;
+            background: var(--bg);
+            color: var(--text);
+            font-family: 'Segoe UI', Roboto, -apple-system, sans-serif;
+            display: flex;
+            justify-content: center;
+            min-height: 100vh;
+        }
+
+        .app-container {
+            width: 100%;
+            max-width: 1100px;
+            padding: 2rem;
+            display: grid;
+            grid-template-columns: 1fr 320px;
+            gap: 2rem;
+        }
+
+        @media (max-width: 900px) {
+            .app-container { grid-template-columns: 1fr; }
+        }
+
+        /* Login Overlay */
+        #auth-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(0,0,0,0.85);
+            backdrop-filter: blur(8px);
+            z-index: 1000;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .auth-card {
+            background: var(--panel);
+            padding: 2.5rem;
+            border-radius: 16px;
+            border: 1px solid var(--border);
+            text-align: center;
+            box-shadow: 0 0 30px rgba(0,0,0,0.5);
+            width: 350px;
+        }
+        .auth-card h2 { margin-top: 0; color: var(--accent); }
+        .input-group { margin: 1.5rem 0; text-align: left; }
+        label { display: block; font-size: 0.85rem; color: var(--muted); margin-bottom: 0.5rem; }
+        input, select {
+            width: 100%;
+            background: #0d1117;
+            border: 1px solid var(--border);
+            color: white;
+            padding: 12px;
+            border-radius: 8px;
+            outline: none;
+        }
+        input:focus { border-color: var(--accent); }
+        .btn {
+            width: 100%;
+            padding: 12px;
+            border: none;
+            border-radius: 8px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: 0.2s;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        .btn-primary {
+            background: var(--accent);
+            color: #000;
+            box-shadow: 0 0 15px var(--accent-glow);
+        }
+        .btn-primary:hover { transform: scale(1.02); filter: brightness(1.1); }
+
+        /* Main Content */
+        .dashboard-section { display: flex; flex-direction: column; gap: 1.5rem; }
+        .card {
+            background: var(--panel);
+            border-radius: 16px;
+            border: 1px solid var(--border);
+            padding: 1.5rem;
+        }
+
+        .profile-header {
+            display: flex;
+            align-items: center;
+            gap: 1.5rem;
+        }
+        .rank-badge {
+            width: 80px;
+            height: 80px;
+            background: linear-gradient(135deg, #1e293b, #0f172a);
+            border: 2px solid var(--lvl-color);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.8rem;
+            font-weight: 800;
+            color: var(--lvl-color);
+            text-shadow: 0 0 10px rgba(255,159,28,0.5);
+        }
+        .user-info h1 { margin: 0; font-size: 1.5rem; }
+        .xp-bar-container { width: 100%; height: 12px; background: #0d1117; border-radius: 6px; margin-top: 10px; overflow: hidden; }
+        .xp-bar-fill { height: 100%; background: linear-gradient(90deg, var(--accent), var(--xp-color)); transition: 0.5s ease; }
+        .xp-text { font-size: 0.8rem; color: var(--muted); margin-top: 5px; }
+
+        /* Task Form */
+        .task-form-grid { display: grid; grid-template-columns: 1fr 150px 100px; gap: 10px; margin-top: 10px; }
+        @media (max-width: 600px) { .task-form-grid { grid-template-columns: 1fr; } }
+
+        /* Leaderboard */
+        .leaderboard-list { display: flex; flex-direction: column; gap: 8px; margin-top: 1rem; }
+        .leader-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px 15px;
+            background: #0d1117;
+            border-radius: 8px;
+            border-left: 3px solid transparent;
+        }
+        .leader-item.me { border-left-color: var(--accent); background: rgba(0,210,255,0.05); }
+        .rank-num { font-weight: bold; width: 25px; color: var(--muted); }
+        .leader-name { flex: 1; margin-left: 10px; font-weight: 500; }
+        .leader-xp { font-family: monospace; color: var(--xp-color); }
+
+        /* History */
+        .history-list { display: flex; flex-direction: column; gap: 8px; margin-top: 1rem; max-height: 300px; overflow-y: auto; }
+        .history-item {
+            background: #0d1117;
+            padding: 12px;
+            border-radius: 8px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 0.9rem;
+        }
+        .difficulty-tag { padding: 3px 8px; border-radius: 4px; font-size: 0.7rem; font-weight: bold; text-transform: uppercase; }
+        .tag-easy { background: #1e293b; color: #94a3b8; }
+        .tag-medium { background: rgba(0,210,255,0.1); color: var(--accent); }
+        .tag-hard { background: rgba(255,77,77,0.1); color: var(--danger); }
+
+        /* Level Up Animation */
+        #level-up-toast {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%) scale(0);
+            background: rgba(0,0,0,0.9);
+            padding: 2rem;
+            border-radius: 20px;
+            border: 2px solid var(--lvl-color);
+            text-align: center;
+            z-index: 2000;
+            pointer-events: none;
+            transition: 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+        }
+        #level-up-toast.active { transform: translate(-50%, -50%) scale(1); opacity: 1; }
+        .lvl-up-text { font-size: 3rem; font-weight: 900; color: var(--lvl-color); margin: 0; }
+        
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+    </style>
+</head>
+<body>
+
+    <!-- Auth Overlay -->
+    <div id="auth-overlay">
+        <div class="auth-card">
+            <h2>Enter the RPG</h2>
+            <p style="color: var(--muted); font-size: 0.9rem;">Choose your unique slayer name</p>
+            <div class="input-group">
+                <label>Username</label>
+                <input type="text" id="username-input" placeholder="e.g. ShadowHunter">
+            </div>
+            <button class="btn btn-primary" id="enter-rpg-btn">Start Adventure</button>
+        </div>
+    </div>
+
+    <!-- Level Up Toast -->
+    <div id="level-up-toast">
+        <p class="lvl-up-text">LEVEL UP!</p>
+        <p id="new-lvl-display" style="font-size: 1.5rem; margin: 10px 0 0 0;">REACHED LEVEL 5</p>
+    </div>
+
+    <div class="app-container">
+        <!-- Main Dashboard -->
+        <main class="dashboard-section">
+            <!-- Profile Card -->
+            <div class="card profile-header">
+                <div class="rank-badge" id="lvl-display">1</div>
+                <div class="user-info" style="flex: 1;">
+                    <h1 id="user-display">Adventurer</h1>
+                    <div class="xp-bar-container">
+                        <div class="xp-bar-fill" id="xp-bar-fill" style="width: 0%;"></div>
+                    </div>
+                    <div class="xp-text" id="xp-text">0 / 100 XP</div>
+                </div>
+            </div>
+
+            <!-- Task Input -->
+            <div class="card">
+                <h3 style="margin-top: 0;">Log Quest</h3>
+                <div class="task-form-grid">
+                    <input type="text" id="task-input" placeholder="Quest objective (e.g. Read 20 pages)">
+                    <select id="diff-select">
+                        <option value="10">Easy (10 XP)</option>
+                        <option value="50">Medium (50 XP)</option>
+                        <option value="100">Hard (100 XP)</option>
+                    </select>
+                    <button class="btn btn-primary" id="add-quest-btn">Log</button>
+                </div>
+            </div>
+
+            <!-- History -->
+            <div class="card">
+                <h3 style="margin-top: 0;">Quest History</h3>
+                <div class="history-list" id="history-list">
+                    <!-- Items injected here -->
+                    <div class="muted" style="text-align: center; padding: 2rem;">No quests completed yet.</div>
+                </div>
+            </div>
+        </main>
+
+        <!-- Sidebar (Leaderboard) -->
+        <aside class="leaderboard-section">
+            <div class="card" style="height: 100%;">
+                <h3 style="margin-top: 0; color: var(--lvl-color);">Global Leaderboard</h3>
+                <div class="leaderboard-list" id="leaderboard-list">
+                    <!-- Top 10 users -->
+                    <div class="muted">Connecting to servers...</div>
+                </div>
+            </div>
+        </aside>
+    </div>
+
+    <script>
+        // --- FIREBASE CONFIGURATION ---
+        // REPLACE THIS OBJECT WITH YOUR OWN CONFIG FROM FIREBASE CONSOLE
+        const firebaseConfig = {
+            apiKey: "AIzaSy...",
+            authDomain: "your-app.firebaseapp.com",
+            databaseURL: "https://your-app-default-rtdb.firebaseio.com",
+            projectId: "your-app",
+            storageBucket: "your-app.appspot.com",
+            messagingSenderId: "...",
+            appId: "..."
+        };
+
+        // Initialize Firebase
+        let database;
+        try {
+            firebase.initializeApp(firebaseConfig);
+            database = firebase.database();
+        } catch (e) {
+            console.error("Firebase init failed. Please check your config.");
+            alert("Database connection failed. Please configure Firebase settings in the code.");
+        }
+
+        // --- GAME LOGIC ---
+        let userData = {
+            username: "",
+            xp: 0,
+            level: 1,
+            history: []
+        };
+
+        const getLvl = (xp) => Math.floor(Math.sqrt(xp) / 10) + 1;
+        const getXPForLvl = (lvl) => Math.pow((lvl - 1) * 10, 2);
+
+        // UI Elements
+        const authOverlay = document.getElementById('auth-overlay');
+        const usernameInput = document.getElementById('username-input');
+        const enterBtn = document.getElementById('enter-rpg-btn');
+        const userDisplay = document.getElementById('user-display');
+        const lvlDisplay = document.getElementById('lvl-display');
+        const xpBarFill = document.getElementById('xp-bar-fill');
+        const xpTextDisplay = document.getElementById('xp-text');
+        const questInput = document.getElementById('task-input');
+        const diffSelect = document.getElementById('diff-select');
+        const addQuestBtn = document.getElementById('add-quest-btn');
+        const historyList = document.getElementById('history-list');
+        const leaderboardList = document.getElementById('leaderboard-list');
+        const lvlUpToast = document.getElementById('level-up-toast');
+        const newLvlDisplay = document.getElementById('new-lvl-display');
+
+        // Authentication Logic
+        enterBtn.onclick = async () => {
+            const name = usernameInput.value.trim();
+            if (name.length < 3) return alert("Username must be at least 3 characters.");
+            
+            userData.username = name;
+            
+            // Fetch existing data or create new
+            const snapshot = await database.ref('users/' + name).once('value');
+            if (snapshot.exists()) {
+                userData = snapshot.val();
+            } else {
+                await database.ref('users/' + name).set(userData);
+            }
+
+            authOverlay.style.display = 'none';
+            userDisplay.textContent = userData.username;
+            updateUI();
+            startLeaderboardSync();
+        };
+
+        // Quest Logic
+        addQuestBtn.onclick = async () => {
+            const objective = questInput.value.trim();
+            if (!objective) return;
+            
+            const xpGain = parseInt(diffSelect.value);
+            const oldLvl = userData.level;
+            
+            userData.xp += xpGain;
+            userData.level = getLvl(userData.xp);
+            
+            const questEntry = {
+                objective,
+                xp: xpGain,
+                diff: diffSelect.options[diffSelect.selectedIndex].text.split(' ')[0].toLowerCase(),
+                ts: Date.now()
+            };
+            
+            if (!userData.history) userData.history = [];
+            userData.history.unshift(questEntry);
+            if (userData.history.length > 20) userData.history.pop();
+
+            // Save to Firebase
+            await database.ref('users/' + userData.username).update({
+                xp: userData.xp,
+                level: userData.level,
+                history: userData.history
+            });
+
+            // UI Feedback
+            questInput.value = '';
+            updateUI();
+            
+            if (userData.level > oldLvl) {
+                triggerLevelUp(userData.level);
+            }
+        };
+
+        function updateUI() {
+            lvlDisplay.textContent = userData.level;
+            const currentLvlXP = getXPForLvl(userData.level);
+            const nextLvlXP = getXPForLvl(userData.level + 1);
+            const progressXP = userData.xp - currentLvlXP;
+            const neededXP = nextLvlXP - currentLvlXP;
+            const percent = (progressXP / neededXP) * 100;
+            
+            xpBarFill.style.width = percent + '%';
+            xpTextDisplay.textContent = `${userData.xp} / ${nextLvlXP} XP`;
+
+            // Render History
+            historyList.innerHTML = '';
+            if (userData.history && userData.history.length > 0) {
+                userData.history.forEach(q => {
+                    const item = document.createElement('div');
+                    item.className = 'history-item';
+                    item.innerHTML = `
+                        <span>${q.objective}</span>
+                        <div style="display:flex; align-items:center; gap:10px;">
+                            <span class="difficulty-tag tag-${q.diff}">${q.diff}</span>
+                            <span style="color:var(--xp-color); font-weight:bold;">+${q.xp} XP</span>
+                        </div>
+                    `;
+                    historyList.appendChild(item);
+                });
+            } else {
+                historyList.innerHTML = '<div class="muted" style="text-align: center; padding: 2rem;">No quests completed yet.</div>';
+            }
+        }
+
+        function triggerLevelUp(lvl) {
+            newLvlDisplay.textContent = `REACHED LEVEL ${lvl}`;
+            lvlUpToast.classList.add('active');
+            setTimeout(() => {
+                lvlUpToast.classList.remove('active');
+            }, 3000);
+        }
+
+        // Leaderboard Logic
+        function startLeaderboardSync() {
+            database.ref('users').orderByChild('xp').limitToLast(10).on('value', (snapshot) => {
+                const users = [];
+                snapshot.forEach(child => {
+                    users.push(child.val());
+                });
+                users.reverse(); // Descending order
+
+                leaderboardList.innerHTML = '';
+                users.forEach((u, index) => {
+                    const div = document.createElement('div');
+                    div.className = `leader-item ${u.username === userData.username ? 'me' : ''}`;
+                    div.innerHTML = `
+                        <span class="rank-num">#${index + 1}</span>
+                        <span class="leader-name">${u.username} <small style="color:var(--muted)">Lv.${u.level}</small></span>
+                        <span class="leader-xp">${u.xp} XP</span>
+                    `;
+                    leaderboardList.appendChild(div);
+                });
+            });
+        }
+    </script>
+</body>
+</html>
